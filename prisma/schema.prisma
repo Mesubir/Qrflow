@@ -1,0 +1,212 @@
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// User Model
+model User {
+  id                 String         @id @default(uuid())
+  email              String         @unique
+  passwordHash       String?
+  name               String?
+  role               String         @default("USER") // USER, ADMIN
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+  
+  // Subscription Info
+  subscriptionPlan   String         @default("FREE") // FREE, STARTER, PRO, BUSINESS, ENTERPRISE
+  subscriptionStatus String         @default("ACTIVE") // ACTIVE, TRIAL, CANCELED, PAST_DUE
+  stripeCustomerId   String?
+  stripeSubId        String?
+  
+  // Relations
+  qrs                QRCode[]
+  folders            Folder[]
+  campaigns          Campaign[]
+  apiKeys            ApiKey[]
+  notifications      Notification[]
+  auditLogs          AuditLog[]
+  sessions           Session[]
+  
+  // Team membership
+  teamMemberships    TeamMember[]
+  ownedTeams         Team[]
+}
+
+// Session Model (Custom Auth)
+model Session {
+  id           String   @id @default(uuid())
+  sessionToken String   @unique
+  userId       String
+  expiresAt    DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt    DateTime @default(now())
+}
+
+// Folder Model
+model Folder {
+  id        String   @id @default(uuid())
+  name      String
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  qrs       QRCode[]
+}
+
+// Campaign Model
+model Campaign {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  userId      String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  qrs         QRCode[]
+}
+
+// QR Code Model (Static or Dynamic)
+model QRCode {
+  id             String             @id @default(uuid())
+  shortCode      String             @unique // The identifier in the redirect link qrflow.com/r/shortCode
+  name           String
+  type           String             @default("STATIC") // STATIC, DYNAMIC
+  qrType         String             @default("WEBSITE") // WEBSITE, PHONE, SMS, EMAIL, WIFI, TEXT, WHATSAPP, UPI, VCARD, PDF, MENU, etc.
+  
+  // Static content or dynamic fallback URL
+  originalUrl    String?            // The destination URL
+  staticData     String?            // JSON string containing static data (e.g. WiFi configuration, text content)
+  
+  status         String             @default("ACTIVE") // ACTIVE, PAUSED, EXPIRED, ARCHIVED
+  scanLimit      Int?               // Maximum scans allowed
+  expiresAt      DateTime?          // Dynamic expiry date
+  passwordHash   String?            // Optional password protection
+  
+  // Custom Styling (Stored as a JSON String for SQLite compatibility)
+  // Contains: primaryColor, secondaryColor, isGradient, gradientType, gradientDirection,
+  // eyeOuterStyle, eyeInnerStyle, logoUrl, patternStyle, roundedEyes, transparentBg
+  stylingJson    String             @default("{}")
+  
+  // Folders & Campaigns
+  folderId       String?
+  folder         Folder?            @relation(fields: [folderId], references: [id], onDelete: SetNull)
+  campaignId     String?
+  campaign       Campaign?          @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  
+  userId         String
+  user           User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+  
+  // Advanced redirect rules
+  redirectRules  QRRedirectRule[]
+  analytics      ScanAnalytics[]
+}
+
+// Advanced Redirection Rules (For Device, Country, Language, Date, Time-based routing)
+model QRRedirectRule {
+  id             String   @id @default(uuid())
+  qrCodeId       String
+  qrCode         QRCode   @relation(fields: [qrCodeId], references: [id], onDelete: Cascade)
+  
+  type           String   // COUNTRY, DEVICE, LANGUAGE, DATE, TIME, AB_TEST
+  key            String   // Match criteria (e.g. 'US', 'iOS', 'en', '2026-07-27', or Weight '30')
+  destinationUrl String   // Target redirection URL
+  
+  createdAt      DateTime @default(now())
+}
+
+// Scan Analytics Logging Model
+model ScanAnalytics {
+  id             String   @id @default(uuid())
+  qrCodeId       String
+  qrCode         QRCode   @relation(fields: [qrCodeId], references: [id], onDelete: Cascade)
+  scannedAt      DateTime @default(now())
+  
+  // Networking & Client Metadata
+  ipAddress      String?
+  country        String   @default("Unknown")
+  region         String   @default("Unknown")
+  city           String   @default("Unknown")
+  timezone       String   @default("UTC")
+  
+  device         String   @default("desktop") // desktop, mobile, tablet, bot
+  browser        String   @default("Unknown")
+  os             String   @default("Unknown")
+  language       String   @default("Unknown")
+  referrer       String   @default("Direct")
+  
+  // UTM Marketing Campaign Attributes
+  utmSource      String?
+  utmMedium      String?
+  utmCampaign    String?
+  utmContent     String?
+  utmTerm        String?
+  
+  isBot          Boolean  @default(false)
+}
+
+// Team Model
+model Team {
+  id        String       @id @default(uuid())
+  name      String
+  ownerId   String
+  owner     User         @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+  
+  members   TeamMember[]
+}
+
+// Team Member Joint Table
+model TeamMember {
+  id        String   @id @default(uuid())
+  teamId    String
+  team      Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role      String   @default("VIEWER") // OWNER, ADMIN, EDITOR, VIEWER
+  createdAt DateTime @default(now())
+  
+  @@unique([teamId, userId])
+}
+
+// API Keys for Developers
+model ApiKey {
+  id        String    @id @default(uuid())
+  key       String    @unique
+  name      String
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime  @default(now())
+  expiresAt DateTime?
+  status    String    @default("ACTIVE") // ACTIVE, REVOKED, EXPIRED
+}
+
+// User Action Audit Logs (Compliance & Security)
+model AuditLog {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  action    String   // e.g. "QR_CREATE", "QR_UPDATE", "RULE_DELETE", "TEAM_INVITE"
+  details   String?  // Description or context
+  createdAt DateTime @default(now())
+}
+
+// Notifications Feed Model
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String
+  message   String
+  read      Boolean  @default(false)
+  type      String   @default("INFO") // INFO, WARNING, SUCCESS, SPIKE, ALERT
+  createdAt DateTime @default(now())
+}
